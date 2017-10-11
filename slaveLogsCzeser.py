@@ -16,6 +16,9 @@ def getTag(taggedObject, tagKey):
    # logging.warn("Tag %s not found",tagKey)
     return None
 
+def attachVolume(volume,instance):
+    print ("Attach "+volume.id+" to instance "+instance.id)
+
 volumes = ec2.volumes.filter(Filters=[
     {
         'Name': 'tag-key',
@@ -27,11 +30,13 @@ volumes = ec2.volumes.filter(Filters=[
     }
 ])
 
+response = requests.get('http://169.254.169.254/latest/meta-data/instance-id')
+local_instance_id = response.text
+instance = e2.Instance(local_instance_id)
+print ('Local instance id '+instance.id)
+
 print('Searching for volumes')
 for volume in volumes:
     ip=getTag(volume,slaveLogsTagKey)
-    print(volume.id + " will be mounted with slave ip "+ip)
+    attachVolume(volume,instance)
 
-response = requests.get('http://169.254.169.254/latest/meta-data/instance-id')
-instance_id = response.text
-print instance_id
