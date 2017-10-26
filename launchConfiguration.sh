@@ -1,5 +1,5 @@
 #!/bin/bash
-pip install awscli botocore --upgrade
+/opt/mesosphere/bin/pip install awscli botocore --upgrade
 
 instanceId=`curl -s http://169.254.169.254/latest/meta-data/instance-id`
 localIP=`curl -s http://169.254.169.254/latest/meta-data/local-ipv4`
