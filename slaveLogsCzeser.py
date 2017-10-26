@@ -51,7 +51,7 @@ volumes = ec2.volumes.filter(Filters=[
 
 response = requests.get('http://169.254.169.254/latest/meta-data/instance-id')
 local_instance_id = response.text
-instance = e2.Instance(local_instance_id)
+instance = ec2.Instance(local_instance_id)
 print ('Local instance id '+instance.id)
 
 print('Searching for volumes')
