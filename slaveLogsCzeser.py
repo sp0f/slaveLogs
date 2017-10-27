@@ -1,15 +1,18 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+import os
 import boto3
 import requests
 import subprocess
 from time import sleep
+from sys import exit
 
 ec2 = boto3.resource('ec2')
 slaveLogsTagKey="slaveLogs"
 slaveLogDir="/mnt/dcos.aws/"
 mountCmd = "sudo /bin/mount"
+mkdirCmd = "sudo /bin/mkdir"
 
 def getTag(taggedObject, tagKey):
     """get tag defined by tagKey param for collection(ec2.Instance, ec2.Image etc.)"""
@@ -45,15 +48,37 @@ def attachVolume(volume,instance):
     return response, attach_device_name
 
 def mountVolume(sysDevId,path):
+    # if directory does not exist, create it (yep, i know about race condition and simply dont care;)
+    if not os.path.exists(path):
+        cmd = mkdirCmd+" "+path
+        try:
+            subprocess.check_call(cmd.split())
+        except subprocess.CalledProcessError:
+            print  "[!] Mount point does not exist and can't be created. Exiting."
+            exit(1)
+    
     cmd = mountCmd +" "+sysDevId+" "+path
     print "[*] Mounting volume ("+cmd+")"
     sleep(3)
     try:
         stdout = subprocess.check_call(cmd.split())
     except subprocess.CalledProcessError:
-        return 1
+        print "[!] Error while mounting volume. Exiting."
+        exit(1)         
     return stdout
 
+def getAZ():
+    response = requests.get('http://169.254.169.254/latest/dynamic/instance-identity/document')
+    az = response.json()['availabilityZone']
+    if az is None:
+        print "[!] Can't determine local az. Exiting"
+        exit(1)
+    return az
+
+
+print '[*] Searching for abandoned slave volumes'
+
+# search for tagged, unattached volumes
 volumes = ec2.volumes.filter(Filters=[
     {
         'Name': 'tag-key',
@@ -65,18 +90,69 @@ volumes = ec2.volumes.filter(Filters=[
     }
 ])
 
+# determine local instance id
 response = requests.get('http://169.254.169.254/latest/meta-data/instance-id')
 local_instance_id = response.text
 instance = ec2.Instance(local_instance_id)
-print ('[?] Local instance id '+instance.id)
+print '[?] Local instance id '+instance.id
 
-print('[*] Searching for abandoned slave volumes')
+# determine local az
+localAZ=getAZ()
+
+
+# mount every abandoned volume
 for volume in volumes:
     ip=getTag(volume,slaveLogsTagKey)
+    
+    # if volume is in different AZ: create snapshot from original volume, create new volume from snapshot in destinagion AZ
+    if(localAZ != volume.availability_zone):
+        print "[?] Volume "+volume.id+" in different AZ - starting miration procedure"
+        snapshot=volume.create_snapshot(
+            Description="Logs volume ("+volume.id+") for deleted slave "+ip,
+            DryRun=False
+        )
+        print "[*] Creating temporary snapshot "+snapshot.id+". Waiting until completed."
+        snapshot.wait_until_completed()
+        # create volume from snapshot and copy src volume tag into it
+        print "[*] Creating volume in destination az"
+        client = boto3.client('ec2')
+        result=client.create_volume(
+            AvailabilityZone=localAZ,
+            Encrypted=True,
+            SnapshotId=snapshot.id,
+            VolumeType="gp2",
+            DryRun=False,
+            TagSpecifications=[
+                {
+                    'ResourceType': 'volume',
+                    'Tags': [
+                        {
+                            'Key': 'slaveLogs',
+                            'Value': ip
+                        },
+                    ]
+                },
+            ]
+        )
+        new_volume=ec2.Volume(result['VolumeId'])
+        print "[?] Waiting for newly created volume "+new_volume.id+" to become available"
+        while new_volume.state == 'creating':
+            sleep(3)
+            #print "Volume state "+new_volume.state
+            new_volume.reload()
+        print "[*] New volume created"
+
+        print "[*] Deleting 'slaveLogs' tag for source volume" 
+        tag = ec2.Tag(volume.id, slaveLogsTagKey, ip)
+        tag.delete()
+        print "[*] Deleting temporary snapshot "+snapshot.id
+        snapshot.delete()
+        volume=new_volume
+        
     _, devId = attachVolume(volume,instance)
     sysDevId="/dev/xvd"+devId[-1]
     mountPath=slaveLogDir+ip
     if (mountVolume(sysDevId,mountPath) != 0):
         print "[!] ERROR while mounting "+sysDevId+" to "+mountPath
-    else:
+    else: 
         print "[*] "+sysDevId+" mounted to "+mountPath+" SUCCESSFULLY"
