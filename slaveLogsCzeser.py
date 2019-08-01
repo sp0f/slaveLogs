@@ -12,7 +12,7 @@ ec2 = boto3.resource('ec2')
 slaveLogsTagKey="slaveLogs"
 slaveLogDir="/mnt/dcos.aws/"
 mountCmd = "sudo /bin/mount"
-mkdirCmd = "sudo /bin/mkdir"
+mkdirCmd = "sudo /bin/mkdir -p"
 
 def getTag(taggedObject, tagKey):
     """get tag defined by tagKey param for collection(ec2.Instance, ec2.Image etc.)"""
@@ -151,7 +151,7 @@ for volume in volumes:
         
     _, devId = attachVolume(volume,instance)
     sysDevId="/dev/xvd"+devId[-1]
-    mountPath=slaveLogDir+ip
+    mountPath=slaveLogDir+"archive/"+ip+"/applogs"
     if (mountVolume(sysDevId,mountPath) != 0):
         print "[!] ERROR while mounting "+sysDevId+" to "+mountPath
     else: 
