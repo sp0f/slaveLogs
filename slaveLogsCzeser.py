@@ -7,6 +7,10 @@ import requests
 import subprocess
 from time import sleep
 from sys import exit
+from requests_aws_sign import AWSV4Sign
+import json
+
+
 
 ec2 = boto3.resource('ec2')
 slaveLogsTagKey="slaveLogs"
@@ -74,6 +78,25 @@ def getAZ():
         print "[!] Can't determine local az. Exiting"
         exit(1)
     return az
+def get_sv4_credentials():
+    session = boto3.session.Session()
+    credentials = session.get_credentials()
+    region = session.region_name
+    service = 'execute-api'
+
+    return AWSV4Sign(credentials, region, service)
+
+def delete_snapshot(snap_id):
+    url = 'https://qbxtsbi0fl.execute-api.eu-west-1.amazonaws.com/v1/snapshot'
+    headers = {'content-type': 'application/json'}
+    payload = {'snap-id': snap_id }
+
+    response = requests.delete(url, data=json.dumps(payload), headers=headers, auth=get_sv4_credentials())
+
+    if response.status_code != requests.codes.ok:
+        print("[!] Error while removing snapshot "+snap_id+": '"+response.json()['message']+"'. Please remove it manually!")
+
+
 
 
 print '[*] Searching for abandoned slave volumes'
@@ -145,8 +168,9 @@ for volume in volumes:
         print "[*] Deleting 'slaveLogs' tag for source volume" 
         tag = ec2.Tag(volume.id, slaveLogsTagKey, ip)
         tag.delete()
+
         print "[*] Deleting temporary snapshot "+snapshot.id
-        snapshot.delete()
+        delete_snapshot(snapshot.id)
         volume=new_volume
         
     _, devId = attachVolume(volume,instance)
