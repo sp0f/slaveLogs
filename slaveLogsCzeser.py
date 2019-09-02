@@ -174,9 +174,9 @@ for volume in volumes:
         volume=new_volume
         
     _, devId = attachVolume(volume,instance)
-    sysDevId="/dev/xvd"+devId[-1]
+    #sysDevId="/dev/sd"+devId[-1]
     mountPath=slaveLogDir+"archive/"+ip+"/applogs"
-    if (mountVolume(sysDevId,mountPath) != 0):
+    if (mountVolume(devId,mountPath) != 0):
         print "[!] ERROR while mounting "+sysDevId+" to "+mountPath
     else: 
-        print "[*] "+sysDevId+" mounted to "+mountPath+" SUCCESSFULLY"
+        print "[*] "+devId+" mounted to "+mountPath+" SUCCESSFULLY"
