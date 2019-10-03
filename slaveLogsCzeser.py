@@ -181,6 +181,6 @@ for volume in volumes:
     else: 
         print "[*] "+devId+" mounted to "+mountPath+" SUCCESSFULLY"
 
-if len(volumes) == 0:
+if len(list(volumes)) == 0:
     print("[*] 0 volumes found")
     exit(1)
