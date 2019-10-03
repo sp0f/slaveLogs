@@ -15,7 +15,7 @@ import json
 ec2 = boto3.resource('ec2')
 slaveLogsTagKey="slaveLogs"
 slaveLogDir="/mnt/dcos.aws/"
-mountCmd = "sudo /bin/mount"
+mountCmd = "sudo /bin/mount -o nouuid"
 mkdirCmd = "sudo /bin/mkdir -p"
 
 def getTag(taggedObject, tagKey):
