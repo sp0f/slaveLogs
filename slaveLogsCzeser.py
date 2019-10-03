@@ -180,3 +180,7 @@ for volume in volumes:
         print "[!] ERROR while mounting "+sysDevId+" to "+mountPath
     else: 
         print "[*] "+devId+" mounted to "+mountPath+" SUCCESSFULLY"
+
+if len(volumes) == 0:
+    print("[*] 0 volumes found")
+    exit(1)
