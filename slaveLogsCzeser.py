@@ -12,7 +12,7 @@ import json
 
 
 
-ec2 = boto3.resource('ec2')
+ec2 = boto3.resource('ec2', region_name='eu-west-1')
 slaveLogsTagKey="slaveLogs"
 slaveLogDir="/mnt/dcos.aws/"
 mountCmd = "sudo /bin/mount -o nouuid"
@@ -124,7 +124,9 @@ localAZ=getAZ()
 
 
 # mount every abandoned volume
+vol_num=0
 for volume in volumes:
+    vol_num=+1
     ip=getTag(volume,slaveLogsTagKey)
     
     # if volume is in different AZ: create snapshot from original volume, create new volume from snapshot in destinagion AZ
@@ -181,6 +183,6 @@ for volume in volumes:
     else: 
         print "[*] "+devId+" mounted to "+mountPath+" SUCCESSFULLY"
 
-if len(list(volumes)) == 0:
+if not vol_num:
     print("[*] 0 volumes found")
     exit(1)
