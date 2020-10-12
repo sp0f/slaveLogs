@@ -66,8 +66,8 @@ def mountVolume(sysDevId,path):
     sleep(3)
     try:
         stdout = subprocess.check_call(cmd.split())
-    except subprocess.CalledProcessError:
-        print "[!] Error while mounting volume. Exiting."
+    except subprocess.CalledProcessError, e:
+        print "[!] Error while mounting volume. Error: "+e.output+". Exiting."
         exit(1)         
     return stdout
 
