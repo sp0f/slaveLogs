@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 import os
@@ -15,7 +15,8 @@ import json
 ec2 = boto3.resource('ec2', region_name='eu-west-1')
 slaveLogsTagKey="slaveLogs"
 slaveLogDir="/mnt/dcos.aws/"
-mountCmd = "sudo /bin/mount -o nouuid"
+mountXfsCmd = "sudo /bin/mount -o nouuid"
+mountExtCmd = "sudo /bin/mount"
 mkdirCmd = "sudo /bin/mkdir -p"
 
 def getTag(taggedObject, tagKey):
@@ -36,46 +37,63 @@ def attachVolume(volume,instance):
     # find first free device name (http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/device_naming.html)
     drive_letter="f"
     while (("/dev/sd"+drive_letter in device_name_list) or ("/dev/xvd"+drive_letter in device_name_list)):
-        print "[?] Device /dev/sd"+drive_letter + " is occupied. Will try another device letter"
+        print("[?] Device /dev/sd"+drive_letter + " is occupied. Will try another device letter")
         drive_letter=chr(ord(drive_letter)+1)
     attach_device_name="/dev/sd"+drive_letter
-    print "[*] Attaching volume "+volume.id+" to instance "+instance.id+" as "+attach_device_name
+    print("[*] Attaching volume "+volume.id+" to instance "+instance.id+" as "+attach_device_name)
     response=instance.attach_volume(
         Device=attach_device_name,
         VolumeId=volume.id,
         DryRun=False
     )
-    print "[?] Wait for attach proces to finish (volume_in_use)"
+    print("[?] Wait for attach proces to finish (volume_in_use)")
     client = boto3.client('ec2', region_name="eu-west-1")
     waiter = client.get_waiter('volume_in_use')
     waiter.wait(VolumeIds=[volume.id])
     return response, attach_device_name
 
-def mountVolume(sysDevId,path):
+def mountVolume(sysDevId,path,ip):
     # if directory does not exist, create it (yep, i know about race condition and simply dont care;)
     if not os.path.exists(path):
         cmd = mkdirCmd+" "+path
         try:
             subprocess.check_call(cmd.split())
         except subprocess.CalledProcessError:
-            print  "[!] Mount point does not exist and can't be created. Exiting."
+            print("[!] Mount point does not exist and can't be created. Exiting.")
+            exit(1)
+    if not os.path.exists("/mnt/dcos.aws/tmp/"+ip):
+        cmd = mkdirCmd+" /mnt/dcos.aws/tmp/"+ip
+        try:
+            subprocess.check_call(cmd.split())
+        except subprocess.CalledProcessError:
+            print("[!] Mount point does not exist and can't be created. Exiting.")
             exit(1)
     
-    cmd = mountCmd +" "+sysDevId+" "+path
-    print "[*] Mounting volume ("+cmd+")"
+    cmd = mountExtCmd +" "+sysDevId+" "+path
     sleep(3)
     try:
+        cmd = mountExtCmd +" "+sysDevId+"1 "+"/mnt/dcos.aws/tmp/"+ip+"/"
+        print("[*] Mounting volume ("+cmd+")")
         stdout = subprocess.check_call(cmd.split())
-    except subprocess.CalledProcessError, e:
-        print "[!] Error while mounting volume. Error: "+e.output+". Exiting."
-        exit(1)         
+        cmd = "mount -o bind /mnt/dcos.aws/tmp/"+ip+"/mnt/localstorage/logs/ /mnt/dcos.aws/archive/"+ip+"/applogs"
+        print("[*] Mounting volume ("+cmd+")")
+        stdout = subprocess.check_call(cmd.split())
+    except subprocess.CalledProcessError as e:
+        print("[!] Error while mounting volume. Will try to mount with different os type.")
+        cmd = mountXfsCmd +" "+sysDevId+" "+path
+        try:
+            subprocess.check_call(cmd.split())
+        except subprocess.CalledProcessError as e:
+            print("[!] Error while mounting volume. Exiting.")
+            exit(1)         
+
     return stdout
 
 def getAZ():
     response = requests.get('http://169.254.169.254/latest/dynamic/instance-identity/document')
     az = response.json()['availabilityZone']
     if az is None:
-        print "[!] Can't determine local az. Exiting"
+        print("[!] Can't determine local az. Exiting")
         exit(1)
     return az
 def get_sv4_credentials():
@@ -95,11 +113,12 @@ def delete_snapshot(snap_id):
 
     if response.status_code != requests.codes.ok:
         print("[!] Error while removing snapshot "+snap_id+": '"+response.json()['message']+"'. Please remove it manually!")
+        print(response.json())
 
 
 
 
-print '[*] Searching for abandoned slave volumes'
+print('[*] Searching for abandoned slave volumes')
 
 # search for tagged, unattached volumes
 volumes = ec2.volumes.filter(Filters=[
@@ -117,7 +136,7 @@ volumes = ec2.volumes.filter(Filters=[
 response = requests.get('http://169.254.169.254/latest/meta-data/instance-id')
 local_instance_id = response.text
 instance = ec2.Instance(local_instance_id)
-print '[?] Local instance id '+instance.id
+print('[?] Local instance id '+instance.id)
 
 # determine local az
 localAZ=getAZ()
@@ -131,15 +150,15 @@ for volume in volumes:
     
     # if volume is in different AZ: create snapshot from original volume, create new volume from snapshot in destinagion AZ
     if(localAZ != volume.availability_zone):
-        print "[?] Volume "+volume.id+" in different AZ - starting miration procedure"
+        print("[?] Volume "+volume.id+" in different AZ - starting miration procedure")
         snapshot=volume.create_snapshot(
             Description="Logs volume ("+volume.id+") for deleted slave "+ip,
             DryRun=False
         )
-        print "[*] Creating temporary snapshot "+snapshot.id+". Waiting until completed."
+        print("[*] Creating temporary snapshot "+snapshot.id+". Waiting until completed.")
         snapshot.wait_until_completed()
         # create volume from snapshot and copy src volume tag into it
-        print "[*] Creating volume in destination az"
+        print("[*] Creating volume in destination az")
         client = boto3.client('ec2')
         result=client.create_volume(
             AvailabilityZone=localAZ,
@@ -160,28 +179,28 @@ for volume in volumes:
             ]
         )
         new_volume=ec2.Volume(result['VolumeId'])
-        print "[?] Waiting for newly created volume "+new_volume.id+" to become available"
+        print("[?] Waiting for newly created volume "+new_volume.id+" to become available")
         while new_volume.state == 'creating':
             sleep(3)
             #print "Volume state "+new_volume.state
             new_volume.reload()
-        print "[*] New volume created"
+        print("[*] New volume created")
 
-        print "[*] Deleting 'slaveLogs' tag for source volume" 
+        print("[*] Deleting 'slaveLogs' tag for source volume")
         tag = ec2.Tag(volume.id, slaveLogsTagKey, ip)
         tag.delete()
 
-        print "[*] Deleting temporary snapshot "+snapshot.id
+        print("[*] Deleting temporary snapshot "+snapshot.id)
         delete_snapshot(snapshot.id)
         volume=new_volume
         
     _, devId = attachVolume(volume,instance)
     #sysDevId="/dev/sd"+devId[-1]
     mountPath=slaveLogDir+"archive/"+ip+"/applogs"
-    if (mountVolume(devId,mountPath) != 0):
-        print "[!] ERROR while mounting "+sysDevId+" to "+mountPath
+    if (mountVolume(devId,mountPath,ip) != 0):
+        print("[!] ERROR while mounting "+sysDevId+" to "+mountPath)
     else: 
-        print "[*] "+devId+" mounted to "+mountPath+" SUCCESSFULLY"
+        print("[*] "+devId+" mounted to "+mountPath+" SUCCESSFULLY")
 
 if not vol_num:
     print("[*] 0 volumes found")
