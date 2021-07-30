@@ -82,7 +82,7 @@ def mountVolume(sysDevId,path,ip):
         print("[!] Error while mounting volume. Will try to mount with different os type.")
         cmd = mountXfsCmd +" "+sysDevId+" "+path
         try:
-            subprocess.check_call(cmd.split())
+            stdout = subprocess.check_call(cmd.split())
         except subprocess.CalledProcessError as e:
             print("[!] Error while mounting volume. Exiting.")
             exit(1)         
@@ -112,7 +112,8 @@ def delete_snapshot(snap_id):
     response = requests.delete(url, data=json.dumps(payload), headers=headers, auth=get_sv4_credentials())
 
     if response.status_code != requests.codes.ok:
-        print("[!] Error while removing snapshot "+snap_id+": '"+response.json()['message']+"'. Please remove it manually!")
+        #print("[!] Error while removing snapshot "+snap_id+": '"+response.json()['message']+"'. Please remove it manually!")
+        print("[!] Error while removing snapshot "+snap_id+". Please remove it manually!")
         print(response.json())
 
 
@@ -144,6 +145,7 @@ localAZ=getAZ()
 
 # mount every abandoned volume
 vol_num=0
+cluster="ECS"
 for volume in volumes:
     vol_num=+1
     ip=getTag(volume,slaveLogsTagKey)
@@ -160,6 +162,10 @@ for volume in volumes:
         # create volume from snapshot and copy src volume tag into it
         print("[*] Creating volume in destination az")
         client = boto3.client('ec2')
+        for tag in volume.tags:
+            if tag['Key'] == "cluster":
+                cluster = tag['Value']
+
         result=client.create_volume(
             AvailabilityZone=localAZ,
             Encrypted=True,
@@ -174,6 +180,14 @@ for volume in volumes:
                             'Key': 'slaveLogs',
                             'Value': ip
                         },
+                        {
+                            'Key': 'Name',
+                            'Value': cluster
+                        },
+                        {
+                            'Key': 'cluster',
+                            'Value': cluster
+                        }
                     ]
                 },
             ]
